@@ -34,13 +34,18 @@ namespace tcp {
  */
 class Read_buffer {
 public:
+  using Alloc = os::mem::buffer::allocator_type;
   /**
    * @brief      Construct a read buffer.
+   *             Min and max need to be power of 2.
    *
-   * @param[in]  capacity  The capacity of the buffer
-   * @param[in]  seq       The sequence number to start on
+   * @param[in]  start  The sequence number the buffer starts on
+   * @param[in]  min    The minimum size of the buffer (preallocated)
+   * @param[in]  max    The maximum size of the buffer (how much it can grow)
    */
-  Read_buffer(const size_t capacity, const seq_t start);
+  Read_buffer(const seq_t start, const size_t min, const size_t max);
+
+  Read_buffer(const seq_t start, const size_t min, const size_t max, const Alloc& alloc);
 
   /**
    * @brief      Insert data into the buffer relative to the sequence number.
@@ -57,12 +62,35 @@ public:
   size_t insert(const seq_t seq, const uint8_t* data, size_t len, bool push = false);
 
   /**
+   * @brief      Returns the amount of the bytes that fits in the buffer
+   *             when starting from "seq".
+   *             If the seq is before the start of the buffer, 0 is returned.
+   *
+   * @param[in]  seq   The sequence number
+   *
+   * @return     Amount of bytes that fits in the buffer starting from seq
+   */
+  size_t fits(const seq_t seq) const
+  {
+    const auto rel = (seq - start);
+    return (rel < capacity()) ? (capacity() - rel) : 0;
+  }
+
+  /**
    * @brief      Exposes the internal buffer
    *
    * @return     A reference to the internal shared buffer
    */
   buffer_t buffer()
   { return buf; }
+
+  /**
+   * @brief  Check if internal buffer has unhandled data
+   *
+   * @return True if the internal buffer is unique with data and doesnt contain hole
+  */
+  bool has_unhandled_data()
+  { return (buf.unique() && (size() > 0) && (missing() == 0)); }
 
   /**
    * @brief      Exposes the internal buffer (read only)
@@ -78,7 +106,7 @@ public:
    * @return     The capacity
    */
   size_t capacity() const noexcept
-  { return buf->capacity(); }
+  { return cap; }
 
   /**
    * @brief      How far into the internal buffer data has been written.
@@ -140,6 +168,12 @@ public:
   void set_start(const seq_t seq)
   { start = seq; }
 
+  seq_t start_seq() const
+  { return start; }
+
+  seq_t end_seq() const
+  { return start + capacity(); }
+
 
   int deserialize_from(void*);
   int serialize_to(void*) const;
@@ -147,16 +181,14 @@ public:
 private:
   buffer_t        buf;
   seq_t           start;
+  size_t          cap;
   int32_t         hole; // number of bytes missing
   bool            push_seen{false};
 
   /**
-   * @brief      Reset the buffer if either non-unique or
-   *             a decrease of the current capacity.
-   *
-   * @param[in]  capacity  The capacity
+   * @brief      Reset the buffer if non-unique
    */
-  void reset_buffer_if_needed(const size_t capacity);
+  void reset_buffer_if_needed();
 
 }; // < class Read_buffer
 

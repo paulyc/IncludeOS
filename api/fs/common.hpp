@@ -21,6 +21,7 @@
 
 #include <memory>
 #include <string>
+#include <pmr>
 #include <vector>
 #include "path.hpp"
 #include <common>
@@ -35,12 +36,12 @@ namespace fs {
   /**
    * @brief Shared vector used as a buffer within the filesystem subsystem
    */
-  using buffer_t = std::shared_ptr<std::vector<uint8_t>>;
+  using buffer_t = os::mem::buf_ptr;
 
   /** Construct a shared vector **/
   template <typename... Args>
   buffer_t construct_buffer(Args&&... args) {
-    return std::make_shared<std::vector<uint8_t>> (std::forward<Args> (args)...);
+    return std::make_shared<os::mem::buffer> (std::forward<Args> (args)...);
   }
 
   /** Container types **/
@@ -150,6 +151,11 @@ namespace fs {
     /// retrieve error status
     error_t error() const noexcept
     { return err_; }
+
+    /**
+     * Returns the underlying buffer
+    **/
+    auto& get() noexcept { return this->buffer_; }
 
     /**
      * @brief Get the starting address of the underlying data buffer

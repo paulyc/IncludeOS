@@ -20,46 +20,59 @@
 #include <stdlib.h>
 #include <stddef.h>
 #include <gsl/gsl_assert>
-void* memalign(size_t alignment, size_t size) {
+#include <errno.h>
+
+void* memalign(size_t align, size_t size) {
   void* ptr {nullptr};
-  int res = posix_memalign(&ptr, alignment, size);
-  Ensures(res == 0);
+
+  if (align < sizeof(void*))
+    align = sizeof(void*);
+  if (size < sizeof(void*))
+    size = sizeof(void*);
+
+  int res = posix_memalign(&ptr, align, size);
+  if (res == EINVAL)
+    printf("Error %i: posix_memalign got invalid alignment param %zu \n", res, align);
+  if (res == ENOMEM)
+    printf("Error %i: posix_memalign failed, not enough memory  %zu \n", res);
   return ptr;
 }
-void* aligned_alloc(size_t alignment, size_t size) {
-  return memalign(alignment, size);
+void* aligned_alloc(size_t align, size_t size) {
+  return memalign(align, size);
 }
 #endif
 
-#include <util/statman.hpp>
-Statman& Statman::get() {
-  static uintptr_t start {0};
-  static const size_t memsize = 0x1000000;
-  if (!start) {
-    start = (uintptr_t) malloc(memsize);
-  }
-  static Statman statman_{start, memsize / sizeof(Stat)};
-  return statman_;
-}
+char _DISK_START_;
+char _DISK_END_;
 
 /// RTC ///
 #include <rtc>
 RTC::timestamp_t RTC::booted_at = 0;
 void RTC::init() {}
 
-/// TIMERS ///
-#include <kernel/timers.hpp>
-void Timers::timers_handler() {}
-void Timers::ready() {}
-void Timers::stop(int) {}
-void Timers::init(const start_func_t&, const stop_func_t&) {}
-Timers::id_t Timers::periodic(duration_t, duration_t, handler_t) {
-  return 0;
-}
-
 #include <service>
 const char* service_binary_name__ = "Service binary name";
 const char* service_name__        = "Service name";
+
+void Service::ready()
+{
+  printf("Service::ready() called\n");
+}
+
+extern "C"
+void kprintf(char* format, ...)
+{
+  va_list args;
+  va_start(args, format);
+  vprintf(format, args);
+  va_end(args);
+}
+
+extern "C"
+void kprint(char* str)
+{
+printf("%s", str);
+}
 
 #include <kernel/os.hpp>
 void OS::start(unsigned, unsigned) {}
@@ -95,6 +108,11 @@ void SystemLog::set_flags(uint32_t) {}
 /// Kernel ///
 char _binary_apic_boot_bin_end;
 char _binary_apic_boot_bin_start;
+char __plugin_ctors_start;
+char __plugin_ctors_end;
+char __service_ctors_start;
+char __service_ctors_end;
+
 char _ELF_START_;
 char _ELF_END_;
 uintptr_t _MULTIBOOT_START_;
@@ -113,7 +131,6 @@ extern "C" {
 /// C ABI ///
   void _init_c_runtime() {}
   void _init_bss() {}
-  void _init_heap(uintptr_t) {}
 
 #ifdef __MACH__
   void _init() {}
@@ -134,13 +151,16 @@ extern "C" {
     return {0};
   }
   void malloc_trim() {}
+  uintptr_t heap_end = std::numeric_limits<uintptr_t>::max();
 
-  __attribute__((weak))
   void __init_serial1 () {}
-  __attribute__((weak))
+
   void __serial_print1(const char* cstr) {
-    static char __printbuf[4096];
-    snprintf(__printbuf, sizeof(__printbuf), "%s", cstr);
+    printf("<serial print1> %s\n", cstr);
+  }
+
+  void __serial_print(const char* cstr, int len) {
+    printf("<serial print> %.*s", len, cstr);
   }
 } // ~ extern "C"
 
@@ -157,9 +177,11 @@ void __arch_reboot() {}
 void __arch_subscribe_irq(uint8_t) {}
 void __arch_enable_legacy_irq(uint8_t) {}
 void __arch_disable_legacy_irq(uint8_t) {}
+void __arch_system_deactivate() {}
 
+delegate<uint64_t()> systime_override = [] () -> uint64_t { return 0; };
 uint64_t __arch_system_time() noexcept {
-  return 0;
+  return systime_override();
 }
 #include <sys/time.h>
 timespec __arch_wall_clock() noexcept {
@@ -190,6 +212,30 @@ namespace x86 {
 bool rdrand32(uint32_t* result) {
   *result = rand();
   return true;
+}
+
+/// heap ///
+uintptr_t __brk_max = 0;
+uintptr_t OS::heap_begin() noexcept {
+  return 0;
+}
+
+uintptr_t OS::memory_end_ = 1 << 30;
+
+uintptr_t OS::heap_end() noexcept {
+  return memory_end_;
+}
+
+size_t OS::heap_usage() noexcept {
+  return OS::heap_end();
+}
+
+uintptr_t OS::heap_max() noexcept {
+  return -1;
+}
+
+size_t OS::total_memuse() noexcept {
+  return heap_end();
 }
 
 #endif

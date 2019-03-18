@@ -10,12 +10,12 @@ inline Connection& Connection::on_connect(ConnectCallback cb) {
 
 inline Connection& Connection::on_read(size_t recv_bufsz, ReadCallback cb)
 {
-  if(not read_request) {
-    read_request = std::make_unique<ReadRequest>(recv_bufsz, seq_t(this->cb.RCV.NXT), cb);
-  } else {
-    read_request->buffer.reset(seq_t(this->cb.RCV.NXT), recv_bufsz);
-    read_request->callback = cb;
-  }
+  _on_read(recv_bufsz, cb);
+  return *this;
+}
+
+inline Connection& Connection::on_data(DataCallback cb) {
+  _on_data(cb);
   return *this;
 }
 
@@ -29,16 +29,6 @@ inline Connection& Connection::on_write(WriteCallback cb) {
   return *this;
 }
 
-inline Connection& Connection::on_packet_dropped(PacketDroppedCallback callback) {
-  on_packet_dropped_ = callback;
-  return *this;
-}
-
-inline Connection& Connection::on_rtx_timeout(RtxTimeoutCallback cb) {
-  on_rtx_timeout_ = cb;
-  return *this;
-}
-
 inline Connection& Connection::on_close(CloseCallback cb) {
   on_close_ = cb;
   return *this;
@@ -46,13 +36,28 @@ inline Connection& Connection::on_close(CloseCallback cb) {
 
 inline Connection& Connection::set_on_read_callback(ReadCallback cb) {
   Expects(read_request != nullptr && "on_read hasn't been called before.");
-  read_request->callback = cb;
+  read_request->on_read_callback = cb;
   return *this;
 }
 
 inline Connection& Connection::_on_cleanup(CleanupCallback cb) {
   _on_cleanup_ = cb;
   return *this;
+}
+
+inline buffer_t Connection::read_next() {
+  static buffer_t empty_buf{};
+  if (UNLIKELY(read_request == nullptr)) {
+    return empty_buf;
+  }
+  return read_request->read_next();
+}
+
+inline size_t Connection::next_size() {
+  if (UNLIKELY(read_request == nullptr)) {
+    return 0;
+  }
+  return read_request->next_size();
 }
 
 inline void Connection::write(const void* buf, size_t n) {
